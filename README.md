@@ -10,7 +10,6 @@ Multi-symbol Toobit USDT-M breakout bot rebuild.
 - Independent symbol and session state
 - UTC/IANA timezone-aware scheduler
 - Range collection from closed-candle high/low shadows
-- Expiration state emitted once per session
 - Multi-symbol market WebSocket subscription
 - Closed-candle detection from live kline bucket transitions
 - Public REST kline client and automatic missing-candle recovery
@@ -22,7 +21,25 @@ Multi-symbol Toobit USDT-M breakout bot rebuild.
 - Per-symbol leverage and margin-mode configuration helpers
 - Market entry with attached TP/SL
 - Explicit rejection versus unknown-order-outcome safety policy
-- Tests for configuration, range building, expiry, WebSocket closure, REST recovery, breakout routing, sizing, TP/SL, and order-failure behavior
+- Expire Manager that cancels BUY and SELL open orders, including TP/SL and pending close orders
+- LONG, SHORT, and hedge-mode position cleanup using Toobit Flash Close
+- Post-close flat-position verification with bounded retries
+- Conservative timeout reconciliation for cancel and close operations
+- Session expiration only after the symbol is verified flat
+- Tests for configuration, range building, WebSocket recovery, breakout routing, sizing, TP/SL, order failures, and expiration edge cases
+
+## Expiration safety sequence
+
+At each configured expiration time the bot performs this sequence for the affected symbol:
+
+1. Cancel all open orders on both BUY and SELL directions.
+2. Query all current positions for the symbol.
+3. Flash-close every open LONG and SHORT side independently.
+4. Re-query positions and verify that the symbol is flat.
+5. Re-cancel orders and retry if a partial close or order race is detected.
+6. Mark the due session expired only after flat verification succeeds.
+
+Timeouts are not assumed successful. The bot queries open orders or positions to reconcile ambiguous outcomes. If it cannot prove that orders are canceled and positions are flat, it raises an expiration error and leaves the session unfinalized for operator attention or a later retry.
 
 ## Security
 
@@ -56,6 +73,6 @@ Keep `dry_run` enabled until exchange integration tests are complete.
 - [x] Public Toobit REST market-data client
 - [x] Breakout strategy and signal routing
 - [x] Order manager with market entry and attached TP/SL
-- [ ] Expire manager: remove TP/SL, then close the position
+- [x] Expire manager: remove TP/SL, close all position sides, and verify flat
 - [ ] Atomic persistence and structured logging
 - [ ] Integration tests and release ZIP
