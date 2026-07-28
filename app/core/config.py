@@ -19,6 +19,27 @@ def _decimal(value: Any, field: str) -> Decimal:
         raise ConfigError(f"{field} must be a decimal number") from exc
 
 
+def _validate_timezone(value: Any) -> str:
+    """Validate an IANA timezone while keeping UTC independent of tzdata.
+
+    Windows does not ship the IANA timezone database used by ``zoneinfo``.
+    UTC itself is built into Python and must remain usable even when the
+    external tzdata package is absent or damaged.
+    """
+    name = str(value or "UTC").strip()
+    if not name:
+        raise ConfigError("timezone cannot be empty")
+    if name.upper() in {"UTC", "ETC/UTC", "ETC/GMT", "GMT"}:
+        return "UTC"
+    try:
+        ZoneInfo(name)
+    except ZoneInfoNotFoundError as exc:
+        raise ConfigError(
+            f"unknown timezone: {name}; install/update the tzdata package on Windows"
+        ) from exc
+    return name
+
+
 @dataclass(frozen=True, slots=True)
 class ExchangeConfig:
     api_key: str
@@ -158,11 +179,7 @@ def load_config(path: str | Path = "config.json") -> BotConfig:
 
     exchange_raw = raw.get("exchange", {})
     runtime_raw = raw.get("runtime", {})
-    timezone_name = str(runtime_raw.get("timezone", "UTC"))
-    try:
-        ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
-        raise ConfigError(f"unknown timezone: {timezone_name}") from exc
+    timezone_name = _validate_timezone(runtime_raw.get("timezone", "UTC"))
 
     exchange = ExchangeConfig(
         api_key=os.getenv("TOOBIT_API_KEY", ""),
