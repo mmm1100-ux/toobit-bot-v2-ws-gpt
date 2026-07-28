@@ -27,11 +27,11 @@ def valid_config() -> dict:
                         "name": "morning",
                         "collection_start": "05:45",
                         "collection_end": "06:15",
-                        "expire_time": "09:00"
+                        "expire_time": "09:00",
                     }
-                ]
+                ],
             }
-        ]
+        ],
     }
 
 
@@ -41,6 +41,20 @@ def test_loads_multi_symbol_config(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path, data))
     assert [item.symbol for item in config.enabled_symbols] == ["ADA-SWAP-USDT", "BTC-SWAP-USDT"]
     assert config.enabled_symbols[1].leverage == 10
+
+
+def test_utc_alias_is_normalized_without_external_timezone_database(tmp_path: Path) -> None:
+    data = valid_config()
+    data["runtime"]["timezone"] = "Etc/UTC"
+    config = load_config(write_config(tmp_path, data))
+    assert config.runtime.timezone == "UTC"
+
+
+def test_rejects_unknown_timezone(tmp_path: Path) -> None:
+    data = valid_config()
+    data["runtime"]["timezone"] = "Invalid/Timezone"
+    with pytest.raises(ConfigError, match="unknown timezone"):
+        load_config(write_config(tmp_path, data))
 
 
 def test_rejects_duplicate_symbols(tmp_path: Path) -> None:
