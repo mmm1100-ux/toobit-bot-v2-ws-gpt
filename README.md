@@ -1,15 +1,50 @@
 # Toobit Bot V2 WS GPT
 
-Trading bot architecture rebuild.
+Multi-symbol Toobit USDT-M breakout bot rebuild.
+
+## Implemented foundation
+
+- Type-safe JSON configuration
+- Independent leverage and sessions per symbol
+- Secrets loaded only from environment variables
+- Independent symbol and session state
+- UTC/IANA timezone-aware scheduler
+- Range collection from closed-candle high/low shadows
+- Expiration state emitted once per session
+- Baseline tests for configuration, range building, and expiry state
+
+## Security
+
+Never store API credentials in `config.json` or Git. Set them in the process environment:
+
+```powershell
+$env:TOOBIT_API_KEY="..."
+$env:TOOBIT_API_SECRET="..."
+```
+
+Any API key previously included in a shared ZIP or repository must be deleted and replaced.
+
+## Local setup
+
+```powershell
+py -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"
+copy config.example.json config.json
+python -m app.main --config config.json
+pytest
+```
+
+Keep `dry_run` enabled until exchange integration tests are complete.
 
 ## Roadmap
 
-- Commit 1: Project structure, config loader, dataclasses, enums, validation, bootstrap
-- Commit 2: State Manager, Symbol Engine, Session Engine
-- Commit 3: WebSocket and REST recovery
-- Commit 4: Breakout Strategy
-- Commit 5: Order Manager
-- Commit 6: Expire Manager
-- Commit 7: Persistence
-- Commit 8: Logger
-- Commit 9: Integration
+- [x] Architecture: multi-symbol engine, session engine, state model
+- [x] Config rewrite and validation
+- [ ] WebSocket manager and REST candle recovery
+- [ ] Toobit REST client
+- [ ] Breakout strategy and signal routing
+- [ ] Order manager with market entry and attached TP/SL
+- [ ] Expire manager: remove TP/SL, then close the position
+- [ ] Atomic persistence and structured logging
+- [ ] Integration tests and release ZIP
