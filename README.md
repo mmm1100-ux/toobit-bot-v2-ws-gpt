@@ -2,52 +2,18 @@
 
 Multi-symbol Toobit USDT-M breakout bot rebuild.
 
-## Implemented foundation
+## Implemented
 
-- Type-safe JSON configuration
-- Independent leverage and sessions per symbol
-- Secrets loaded only from environment variables
-- Independent symbol and session state
-- UTC/IANA timezone-aware scheduler
-- Range collection from closed-candle high/low shadows
-- Multi-symbol market WebSocket subscription
-- Closed-candle detection from live kline bucket transitions
-- Public REST kline client and automatic missing-candle recovery
-- Close-confirmed long/short breakout strategy
-- One signal reservation per symbol session
-- Signed Toobit private REST client
-- Total futures wallet-balance sizing
-- Quantity and price rounding with exchange rules
-- Per-symbol leverage and margin-mode configuration helpers
-- Market entry with attached TP/SL
-- Explicit rejection versus unknown-order-outcome safety policy
-- Expire Manager that cancels BUY and SELL open orders, including TP/SL and pending close orders
-- LONG, SHORT, and hedge-mode position cleanup using Toobit Flash Close
-- Post-close flat-position verification with bounded retries
-- Conservative timeout reconciliation for cancel and close operations
-- Session expiration only after the symbol is verified flat
-- Atomic state writes using temp file, fsync, and replace
-- Full Decimal/enums/candle/session restoration after restart
-- Versioned state migration and fail-closed corrupt-state handling
-- Structured JSON logs to console and file
-- Tests for strategy, execution, expiration, persistence, migration, and interrupted writes
-
-## Persistence safety
-
-State is written to a temporary file, flushed to disk, and atomically moved over the previous state. A failed write does not delete the last valid state. On startup, corrupt or unsupported future-version state fails closed instead of silently resetting sessions and risking a duplicate trade.
-
-## Expiration safety sequence
-
-At each configured expiration time the bot performs this sequence for the affected symbol:
-
-1. Cancel all open orders on both BUY and SELL directions.
-2. Query all current positions for the symbol.
-3. Flash-close every open LONG and SHORT side independently.
-4. Re-query positions and verify that the symbol is flat.
-5. Re-cancel orders and retry if a partial close or order race is detected.
-6. Mark the due session expired only after flat verification succeeds.
-
-Timeouts are not assumed successful. The bot queries open orders or positions to reconcile ambiguous outcomes. If it cannot prove that orders are canceled and positions are flat, it raises an expiration error and leaves the session unfinalized.
+- Type-safe multi-symbol configuration and independent sessions
+- Market WebSocket with reconnect, ping/pong, closed-candle detection, and REST gap recovery
+- Close-confirmed LONG/SHORT breakout strategy with one trade reservation per session
+- Signed private REST client, balance-based sizing, exchange-rule rounding, market entry, and attached TP/SL
+- Safe expiration flow: cancel orders, close LONG/SHORT or hedge positions, retry partial closes, and verify flat
+- Atomic versioned state persistence and complete restart recovery
+- Structured JSON logging
+- Integrated runtime coordinating market data, strategy, execution, expiration, and persistence
+- End-to-end runtime tests and GitHub Actions CI for Python 3.11 and 3.12
+- Reproducible release ZIP builder
 
 ## Security
 
@@ -60,27 +26,43 @@ $env:TOOBIT_API_SECRET="..."
 
 Any API key previously included in a shared ZIP or repository must be deleted and replaced.
 
-## Local setup
+## Setup
 
 ```powershell
 py -m venv .venv
 .venv\Scripts\activate
 pip install -e ".[dev]"
 copy config.example.json config.json
-python -m app.main --config config.json
+python -m app.main --config config.json --check
 pytest
 ```
 
-Keep `dry_run` enabled until exchange integration tests are complete.
+Start the bot in dry-run mode:
 
-## Roadmap
+```powershell
+python -m app.main --config config.json
+```
 
-- [x] Architecture: multi-symbol engine, session engine, state model
-- [x] Config rewrite and validation
-- [x] WebSocket manager and REST candle recovery
-- [x] Public Toobit REST market-data client
-- [x] Breakout strategy and signal routing
-- [x] Order manager with market entry and attached TP/SL
-- [x] Expire manager: remove TP/SL, close all position sides, and verify flat
-- [x] Atomic persistence, restart recovery, migrations, and structured logging
-- [ ] Integration tests and release ZIP
+Build the distributable archive:
+
+```powershell
+python scripts/build_release.py
+```
+
+The archive is created at `dist/toobit-bot-v2.zip`.
+
+## Production checklist
+
+1. Keep `dry_run=true` while validating symbols, schedules, wallet percentages, leverage, TP/SL, and timezone.
+2. Revoke all previously exposed API keys and create a restricted futures-trading key without withdrawal permission.
+3. Run `python -m app.main --config config.json --check` and the complete test suite.
+4. Validate contract quantity and price rules against the live exchange before disabling dry-run.
+5. Start with minimal capital and monitor JSON logs, open orders, positions, and expiration cleanup.
+
+## Expiration safety sequence
+
+At each configured expiration time the bot cancels open orders on both directions, queries all positions, closes each LONG and SHORT side, verifies the symbol is flat, and retries bounded partial-close or race conditions. Ambiguous timeouts are reconciled through read-only queries and are never silently treated as success.
+
+## Project status
+
+All planned implementation phases are complete. Live exchange certification remains an operational step and must be performed with a newly issued restricted API key and minimal capital before normal use.
