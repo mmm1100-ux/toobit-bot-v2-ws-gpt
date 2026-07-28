@@ -4,7 +4,6 @@ import json
 import logging
 import random
 import threading
-import time
 from collections.abc import Callable, Iterable
 
 import websocket
@@ -33,7 +32,7 @@ class ToobitMarketWebSocket:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._app: websocket.WebSocketApp | None = None
-        self._last_open_by_symbol: dict[str, int] = {}
+        self._pending: dict[str, Candle] = {}
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -94,8 +93,8 @@ class ToobitMarketWebSocket:
             if not isinstance(item, dict) or not {"t", "s", "o", "h", "l", "c"} <= item.keys():
                 continue
             candle = Candle.from_ws(self.interval, item)
-            previous_open = self._last_open_by_symbol.get(candle.symbol)
-            self._last_open_by_symbol[candle.symbol] = candle.open_time_ms
-            if previous_open is not None and candle.open_time_ms > previous_open:
-                # The first update for a new bucket proves the previous bucket is closed.
-                self.on_candle(candle)
+            previous = self._pending.get(candle.symbol)
+            if previous is not None and candle.open_time_ms > previous.open_time_ms:
+                self.on_candle(previous)
+            if previous is None or candle.open_time_ms >= previous.open_time_ms:
+                self._pending[candle.symbol] = candle
