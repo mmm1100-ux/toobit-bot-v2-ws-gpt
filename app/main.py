@@ -1,36 +1,29 @@
 from __future__ import annotations
 
 import argparse
-import logging
 
 from app.core.config import load_config
-from app.core.engine import TradingEngine
 from app.core.logging import configure_logging
-from app.storage import AtomicStateStore
+from app.runtime import BotRuntime
+from app.storage.state_store import AtomicStateStore
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Toobit multi-symbol breakout bot")
     parser.add_argument("--config", default="config.json")
+    parser.add_argument("--check", action="store_true", help="validate configuration and persisted state, then exit")
     args = parser.parse_args()
 
     config = load_config(args.config)
     configure_logging(config.runtime.log_path)
-    logger = logging.getLogger(__name__)
     store = AtomicStateStore(config.runtime.state_path)
-    state = store.load()
-    engine = TradingEngine(config, state)
-    store.save(engine.state)
-    logger.info(
-        "bot state loaded",
-        extra={"event": "startup", "symbol": ",".join(engine.symbols)},
-    )
-    logger.info(
-        "configuration ready timezone=%s dry_run=%s",
-        config.runtime.timezone,
-        config.runtime.dry_run,
-        extra={"event": "config_ready"},
-    )
+    runtime = BotRuntime(config, state_store=store)
+
+    if args.check:
+        store.save(runtime.state)
+        return 0
+
+    runtime.run_forever()
     return 0
 
 
