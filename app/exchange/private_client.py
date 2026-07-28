@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import time
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -55,6 +56,24 @@ class ToobitPrivateClient:
 
     def balance(self) -> Any:
         return self._signed("GET", "/api/v1/futures/balance")
+
+    def total_balance(self, coin: str = "USDT") -> Decimal:
+        response = self.balance()
+        rows = response.get("data", response) if isinstance(response, dict) else response
+        for row in rows:
+            if str(row.get("coin", "")).upper() == coin.upper():
+                return Decimal(str(row["balance"]))
+        raise ToobitApiError(f"{coin} futures balance not found")
+
+    def set_margin_type(self, symbol: str, margin_type: str) -> Any:
+        return self._signed("POST", "/api/v1/futures/marginType", {"symbol": symbol, "marginType": margin_type})
+
+    def set_leverage(self, symbol: str, leverage: int) -> Any:
+        return self._signed("POST", "/api/v1/futures/leverage", {"symbol": symbol, "leverage": leverage})
+
+    def configure_symbol(self, symbol: str, margin_type: str, leverage: int) -> None:
+        self.set_margin_type(symbol, margin_type)
+        self.set_leverage(symbol, leverage)
 
     def place_market_order(self, **params: Any) -> Any:
         return self._signed("POST", "/api/v1/futures/order", params)
