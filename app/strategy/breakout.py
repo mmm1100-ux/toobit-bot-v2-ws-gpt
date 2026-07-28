@@ -17,7 +17,7 @@ class BreakoutStrategy:
         candle: Candle,
         state: SessionState,
     ) -> TradeSignal | None:
-        if state.expired or state.trade_committed:
+        if state.expired or state.signal_emitted or state.trade_committed:
             return None
         if state.range_high is None or state.range_low is None:
             return None
