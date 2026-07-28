@@ -1,0 +1,53 @@
+{
+  "exchange": {
+    "base_url": "https://api.toobit.com",
+    "ws_url": "wss://stream.toobit.com/quote/ws/v1",
+    "recv_window": 5000,
+    "server_time_sync_seconds": 60
+  },
+  "runtime": {
+    "timezone": "UTC",
+    "timeframe": "5m",
+    "dry_run": true,
+    "state_path": "state.json",
+    "log_path": "logs/bot.log"
+  },
+  "symbols": [
+    {
+      "symbol": "ADA-SWAP-USDT",
+      "enabled": true,
+      "margin_type": "CROSS",
+      "leverage": 20,
+      "wallet_percent": 5.0,
+      "take_profit_percent": 0.5,
+      "stop_loss_percent": 0.5,
+      "trigger_by": "CONTRACT_PRICE",
+      "sessions": [
+        {
+          "name": "ada_morning",
+          "collection_start": "05:45",
+          "collection_end": "06:15",
+          "expire_time": "09:00"
+        }
+      ]
+    },
+    {
+      "symbol": "BTC-SWAP-USDT",
+      "enabled": true,
+      "margin_type": "CROSS",
+      "leverage": 10,
+      "wallet_percent": 5.0,
+      "take_profit_percent": 0.5,
+      "stop_loss_percent": 0.5,
+      "trigger_by": "CONTRACT_PRICE",
+      "sessions": [
+        {
+          "name": "btc_morning",
+          "collection_start": "06:30",
+          "collection_end": "07:00",
+          "expire_time": "10:00"
+        }
+      ]
+    }
+  ]
+}
