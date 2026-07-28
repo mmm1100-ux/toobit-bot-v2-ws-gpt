@@ -80,3 +80,36 @@ class ToobitPrivateClient:
 
     def query_order(self, client_order_id: str) -> Any:
         return self._signed("GET", "/api/v1/futures/order", {"origClientOrderId": client_order_id, "type": "LIMIT"})
+
+    def open_orders(self, symbol: str, order_type: str | None = None) -> Any:
+        params: dict[str, Any] = {"symbol": symbol, "limit": 1000}
+        if order_type:
+            params["type"] = order_type
+        return self._signed("GET", "/api/v1/futures/openOrders", params)
+
+    def cancel_all_orders(self, symbol: str) -> Any:
+        # Toobit requires BUY/SELL. Cancel both directions so entry, close, stop and TP/SL orders are covered.
+        results = []
+        errors: list[ToobitApiError] = []
+        for side in ("BUY", "SELL"):
+            try:
+                results.append(self._signed("DELETE", "/api/v1/futures/batchOrders", {"symbol": symbol, "side": side}))
+            except ToobitApiError as exc:
+                errors.append(exc)
+        if len(errors) == 2:
+            ambiguous = any(error.ambiguous for error in errors)
+            code = errors[0].code if errors[0].code == errors[1].code else None
+            raise ToobitApiError("; ".join(str(error) for error in errors), code=code, ambiguous=ambiguous)
+        return results
+
+    def positions(self, symbol: str, side: str | None = None) -> Any:
+        params: dict[str, Any] = {"symbol": symbol}
+        if side:
+            params["side"] = side
+        return self._signed("GET", "/api/v1/futures/positions", params)
+
+    def flash_close(self, symbol: str, side: str, client_order_id: str | None = None) -> Any:
+        params: dict[str, Any] = {"symbol": symbol, "side": side}
+        if client_order_id:
+            params["clientOrderId"] = client_order_id
+        return self._signed("POST", "/api/v1/futures/flashClose", params)
