@@ -15,7 +15,10 @@ def main() -> int:
     args = parser.parse_args()
 
     config = load_config(args.config)
-    configure_logging(config.runtime.log_path)
+    configure_logging(
+        config.runtime.log_path,
+        timezone_name=config.runtime.timezone,
+    )
     store = AtomicStateStore(config.runtime.state_path)
     runtime = BotRuntime(config, state_store=store)
 
