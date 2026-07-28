@@ -11,7 +11,10 @@ Multi-symbol Toobit USDT-M breakout bot rebuild.
 - UTC/IANA timezone-aware scheduler
 - Range collection from closed-candle high/low shadows
 - Expiration state emitted once per session
-- Baseline tests for configuration, range building, and expiry state
+- Multi-symbol market WebSocket subscription
+- Closed-candle detection from live kline bucket transitions
+- Public REST kline client and automatic missing-candle recovery
+- Tests for configuration, range building, expiry, WebSocket closure, and REST recovery
 
 ## Security
 
@@ -41,8 +44,8 @@ Keep `dry_run` enabled until exchange integration tests are complete.
 
 - [x] Architecture: multi-symbol engine, session engine, state model
 - [x] Config rewrite and validation
-- [ ] WebSocket manager and REST candle recovery
-- [ ] Toobit REST client
+- [x] WebSocket manager and REST candle recovery
+- [x] Public Toobit REST market-data client
 - [ ] Breakout strategy and signal routing
 - [ ] Order manager with market entry and attached TP/SL
 - [ ] Expire manager: remove TP/SL, then close the position
