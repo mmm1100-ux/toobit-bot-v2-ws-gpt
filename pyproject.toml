@@ -1,0 +1,19 @@
+[project]
+name = "toobit-bot-v2-ws-gpt"
+version = "0.1.0"
+description = "Multi-symbol Toobit breakout trading bot"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32,<3",
+  "websocket-client>=1.8,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2,<9",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
