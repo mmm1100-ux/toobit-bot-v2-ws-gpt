@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from app.core.config import BotConfig
 from app.core.engine import TradingEngine
@@ -41,6 +42,7 @@ class BotRuntime:
         poll_seconds: float = 1.0,
     ) -> None:
         self.config = config
+        self.local_timezone = ZoneInfo(config.runtime.timezone)
         self.state_store = state_store
         self.state = state_store.load()
         self.engine = TradingEngine(config, self.state)
@@ -52,7 +54,7 @@ class BotRuntime:
             config.exchange.recv_window,
         )
         self.collector = CandleCollector(config.runtime.timeframe, self.rest.fetch_klines)
-        self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.clock = clock or (lambda: datetime.now(self.local_timezone))
         self.poll_seconds = poll_seconds
         self._stop = threading.Event()
         self._lock = threading.RLock()
@@ -60,7 +62,7 @@ class BotRuntime:
         rules = contract_rules or {}
         self.signal_executor = SignalExecutor(OrderManager(self.private, rules)) if rules else None
         self.expire = ExpireCoordinator(ExpireManager(self.private))
-        for symbol, symbol_engine in self.engine.symbols.items():
+        for symbol_engine in self.engine.symbols.values():
             symbol_engine.on_signal = self._on_signal
 
         self.ws = ToobitMarketWebSocket(
@@ -70,12 +72,26 @@ class BotRuntime:
             url=config.exchange.ws_url,
         )
 
+    def _as_local(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(self.local_timezone)
+
     def _persist(self) -> None:
         self.state_store.save(self.state)
 
     def _on_market_candle(self, candle: Candle) -> None:
         with self._lock:
             recovered = self.collector.ingest(candle)
+            if recovered:
+                LOGGER.warning(
+                    "market_candles_recovered",
+                    extra={
+                        "event": "market_candles_recovered",
+                        "symbol": candle.symbol,
+                        "count": len(recovered),
+                    },
+                )
             for item in [*recovered, candle]:
                 self._route_closed_candle(item)
             self._persist()
@@ -83,9 +99,19 @@ class BotRuntime:
     def _route_closed_candle(self, candle: Candle) -> None:
         engine = self.engine.symbols.get(candle.symbol)
         if engine is None:
+            LOGGER.warning("unknown_market_symbol", extra={"event": "unknown_market_symbol", "symbol": candle.symbol})
             return
-        opened_at = datetime.fromtimestamp(candle.open_time_ms / 1000, tz=timezone.utc)
-        engine.on_closed_candle(
+
+        opened_utc = datetime.fromtimestamp(candle.open_time_ms / 1000, tz=timezone.utc)
+        closed_utc = datetime.fromtimestamp(candle.close_time_ms / 1000, tz=timezone.utc)
+        opened_local = opened_utc.astimezone(self.local_timezone)
+        closed_local = closed_utc.astimezone(self.local_timezone)
+
+        before = {
+            key: (state.phase.value, len(state.range_candles), state.range_high, state.range_low)
+            for key, state in engine.state.sessions.items()
+        }
+        signals = engine.on_closed_candle(
             StateCandle(
                 open_time=candle.open_time_ms,
                 open=candle.open,
@@ -93,29 +119,88 @@ class BotRuntime:
                 low=candle.low,
                 close=candle.close,
             ),
-            opened_at,
+            opened_local,
         )
+
+        LOGGER.info(
+            "closed_candle_routed",
+            extra={
+                "event": "closed_candle_routed",
+                "symbol": candle.symbol,
+                "interval": candle.interval,
+                "timezone": self.config.runtime.timezone,
+                "candle_open_time": opened_local.isoformat(),
+                "candle_close_time": closed_local.isoformat(),
+                "open": str(candle.open),
+                "high": str(candle.high),
+                "low": str(candle.low),
+                "close": str(candle.close),
+                "volume": str(candle.volume),
+                "signal_count": len(signals),
+            },
+        )
+
+        for key, state in engine.state.sessions.items():
+            current = (state.phase.value, len(state.range_candles), state.range_high, state.range_low)
+            if before.get(key) != current:
+                LOGGER.info(
+                    "session_state_changed",
+                    extra={
+                        "event": "session_state_changed",
+                        "symbol": candle.symbol,
+                        "session": key,
+                        "phase": state.phase.value,
+                        "range_candle_count": len(state.range_candles),
+                        "range_high": str(state.range_high) if state.range_high is not None else None,
+                        "range_low": str(state.range_low) if state.range_low is not None else None,
+                        "signal_emitted": state.signal_emitted,
+                        "expired": state.expired,
+                    },
+                )
 
     def _on_signal(self, signal: TradeSignal) -> None:
         symbol_engine = self.engine.symbols[signal.symbol]
         state = symbol_engine.state.sessions[signal.session_key]
+        details = {
+            "event": "dry_run_signal" if self.config.runtime.dry_run else "live_signal",
+            "symbol": signal.symbol,
+            "session": signal.session_name,
+            "direction": signal.side.value,
+            "signal_price": str(signal.close_price),
+            "range_high": str(signal.range_high),
+            "range_low": str(signal.range_low),
+            "candle_open_time": signal.candle_open_time,
+        }
         if self.config.runtime.dry_run:
-            LOGGER.info("dry_run_signal", extra={"event": "dry_run_signal", "symbol": signal.symbol, "session": signal.session_name})
+            LOGGER.info("dry_run_signal", extra=details)
             self._persist()
             return
         if self.signal_executor is None:
             raise RuntimeError("live mode requires contract rules")
+        LOGGER.info("live_signal", extra=details)
         wallet = self.private.total_balance()
         self.signal_executor.execute(signal, symbol_engine.config, state, wallet)
         self._persist()
 
     def run_expirations_once(self, now: datetime | None = None) -> None:
         with self._lock:
-            current = now or self.clock()
+            current = self._as_local(now or self.clock())
             for engine in self.engine.symbols.values():
+                due = engine.due_expirations(current)
+                if not due:
+                    continue
                 if self.config.runtime.dry_run:
-                    for _, state in engine.due_expirations(current):
+                    for session_name, state in due:
                         state.expire()
+                        LOGGER.info(
+                            "dry_run_session_expired",
+                            extra={
+                                "event": "dry_run_session_expired",
+                                "symbol": engine.config.symbol,
+                                "session": session_name,
+                                "local_time": current.isoformat(),
+                            },
+                        )
                 else:
                     self.expire.run_due(engine, current)
             self._persist()
@@ -123,14 +208,24 @@ class BotRuntime:
     def run_forever(self) -> None:
         self._install_signal_handlers()
         self.ws.start()
-        LOGGER.info("bot_started", extra={"event": "bot_started"})
+        LOGGER.info(
+            "bot_started",
+            extra={
+                "event": "bot_started",
+                "timezone": self.config.runtime.timezone,
+                "local_time": self.clock().astimezone(self.local_timezone).isoformat(),
+                "dry_run": self.config.runtime.dry_run,
+                "symbols": list(self.engine.symbols),
+                "timeframe": self.config.runtime.timeframe,
+            },
+        )
         try:
             while not self._stop.wait(self.poll_seconds):
                 self.run_expirations_once()
         finally:
             self.ws.stop()
             self._persist()
-            LOGGER.info("bot_stopped", extra={"event": "bot_stopped"})
+            LOGGER.info("bot_stopped", extra={"event": "bot_stopped", "local_time": datetime.now(self.local_timezone).isoformat()})
 
     def stop(self) -> None:
         self._stop.set()
