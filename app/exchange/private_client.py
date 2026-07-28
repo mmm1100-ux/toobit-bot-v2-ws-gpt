@@ -91,14 +91,16 @@ class ToobitPrivateClient:
         # Toobit requires BUY/SELL. Cancel both directions so entry, close, stop and TP/SL orders are covered.
         results = []
         errors: list[ToobitApiError] = []
+        benign_codes = {-2011, -2013, -3145}
         for side in ("BUY", "SELL"):
             try:
                 results.append(self._signed("DELETE", "/api/v1/futures/batchOrders", {"symbol": symbol, "side": side}))
             except ToobitApiError as exc:
-                errors.append(exc)
-        if len(errors) == 2:
+                if exc.code not in benign_codes:
+                    errors.append(exc)
+        if errors:
             ambiguous = any(error.ambiguous for error in errors)
-            code = errors[0].code if errors[0].code == errors[1].code else None
+            code = errors[0].code if all(error.code == errors[0].code for error in errors) else None
             raise ToobitApiError("; ".join(str(error) for error in errors), code=code, ambiguous=ambiguous)
         return results
 
