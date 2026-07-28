@@ -56,12 +56,22 @@ class ToobitMarketWebSocket:
             def on_open(ws: websocket.WebSocketApp) -> None:
                 nonlocal opened
                 opened = True
-                ws.send(json.dumps({
+                request = {
                     "symbol": ",".join(self.symbols),
                     "topic": f"kline_{self.interval}",
                     "event": "sub",
                     "params": {"binary": False},
-                }))
+                }
+                ws.send(json.dumps(request))
+                LOGGER.info(
+                    "market_websocket_subscribed",
+                    extra={
+                        "event": "market_websocket_subscribed",
+                        "symbols": list(self.symbols),
+                        "interval": self.interval,
+                        "topic": request["topic"],
+                    },
+                )
 
             self._app = websocket.WebSocketApp(
                 self.url,
@@ -78,6 +88,10 @@ class ToobitMarketWebSocket:
                 break
             failures = 0 if opened else failures + 1
             delay = min(self.max_backoff_seconds, 2 ** min(failures, 5)) + random.random()
+            LOGGER.warning(
+                "market_websocket_reconnect_scheduled",
+                extra={"event": "market_websocket_reconnect_scheduled", "delay_seconds": round(delay, 3)},
+            )
             self._stop.wait(delay)
 
     def _handle_message(self, raw: str | bytes) -> None:
@@ -86,6 +100,8 @@ class ToobitMarketWebSocket:
             if self._app:
                 self._app.send(json.dumps({"pong": message["ping"]}))
             return
+        if message.get("event") or message.get("code") is not None:
+            LOGGER.info("market_websocket_response", extra={"event": "market_websocket_response", "response": message})
         data = message.get("data")
         if not isinstance(data, list):
             return
@@ -95,6 +111,21 @@ class ToobitMarketWebSocket:
             candle = Candle.from_ws(self.interval, item)
             previous = self._pending.get(candle.symbol)
             if previous is not None and candle.open_time_ms > previous.open_time_ms:
+                LOGGER.info(
+                    "market_candle_closed",
+                    extra={
+                        "event": "market_candle_closed",
+                        "symbol": previous.symbol,
+                        "interval": previous.interval,
+                        "open_time_ms": previous.open_time_ms,
+                        "close_time_ms": previous.close_time_ms,
+                        "open": str(previous.open),
+                        "high": str(previous.high),
+                        "low": str(previous.low),
+                        "close": str(previous.close),
+                        "volume": str(previous.volume),
+                    },
+                )
                 self.on_candle(previous)
             if previous is None or candle.open_time_ms >= previous.open_time_ms:
                 self._pending[candle.symbol] = candle
