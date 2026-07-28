@@ -23,6 +23,8 @@ class SessionState:
     range_high: Decimal | None = None
     range_low: Decimal | None = None
     range_candles: dict[int, Candle] = field(default_factory=dict)
+    signal_emitted: bool = False
+    signal_candle_open_time: int | None = None
     trade_committed: bool = False
     expired: bool = False
     direction: PositionSide | None = None
@@ -42,6 +44,22 @@ class SessionState:
         self.phase = SessionPhase.WAITING_BREAKOUT
         return True
 
+    def reserve_signal(self, candle_open_time: int, direction: PositionSide, signal_price: Decimal) -> None:
+        if self.signal_emitted or self.trade_committed:
+            raise RuntimeError("session signal already consumed")
+        self.signal_emitted = True
+        self.signal_candle_open_time = candle_open_time
+        self.direction = direction
+        self.signal_price = signal_price
+
+    def release_signal(self) -> None:
+        if self.trade_committed:
+            raise RuntimeError("cannot release a committed trade")
+        self.signal_emitted = False
+        self.signal_candle_open_time = None
+        self.direction = None
+        self.signal_price = None
+
     def commit_trade(
         self,
         direction: PositionSide,
@@ -51,6 +69,7 @@ class SessionState:
     ) -> None:
         if self.trade_committed:
             raise RuntimeError("session already consumed")
+        self.signal_emitted = True
         self.trade_committed = True
         self.phase = SessionPhase.TRADE_COMMITTED
         self.direction = direction
