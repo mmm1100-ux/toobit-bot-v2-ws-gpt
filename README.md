@@ -26,7 +26,15 @@ Multi-symbol Toobit USDT-M breakout bot rebuild.
 - Post-close flat-position verification with bounded retries
 - Conservative timeout reconciliation for cancel and close operations
 - Session expiration only after the symbol is verified flat
-- Tests for configuration, range building, WebSocket recovery, breakout routing, sizing, TP/SL, order failures, and expiration edge cases
+- Atomic state writes using temp file, fsync, and replace
+- Full Decimal/enums/candle/session restoration after restart
+- Versioned state migration and fail-closed corrupt-state handling
+- Structured JSON logs to console and file
+- Tests for strategy, execution, expiration, persistence, migration, and interrupted writes
+
+## Persistence safety
+
+State is written to a temporary file, flushed to disk, and atomically moved over the previous state. A failed write does not delete the last valid state. On startup, corrupt or unsupported future-version state fails closed instead of silently resetting sessions and risking a duplicate trade.
 
 ## Expiration safety sequence
 
@@ -39,7 +47,7 @@ At each configured expiration time the bot performs this sequence for the affect
 5. Re-cancel orders and retry if a partial close or order race is detected.
 6. Mark the due session expired only after flat verification succeeds.
 
-Timeouts are not assumed successful. The bot queries open orders or positions to reconcile ambiguous outcomes. If it cannot prove that orders are canceled and positions are flat, it raises an expiration error and leaves the session unfinalized for operator attention or a later retry.
+Timeouts are not assumed successful. The bot queries open orders or positions to reconcile ambiguous outcomes. If it cannot prove that orders are canceled and positions are flat, it raises an expiration error and leaves the session unfinalized.
 
 ## Security
 
@@ -74,5 +82,5 @@ Keep `dry_run` enabled until exchange integration tests are complete.
 - [x] Breakout strategy and signal routing
 - [x] Order manager with market entry and attached TP/SL
 - [x] Expire manager: remove TP/SL, close all position sides, and verify flat
-- [ ] Atomic persistence and structured logging
+- [x] Atomic persistence, restart recovery, migrations, and structured logging
 - [ ] Integration tests and release ZIP
