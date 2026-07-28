@@ -63,6 +63,34 @@ def test_runtime_routes_candles_persists_and_expires(tmp_path):
     assert state.expired is True
 
 
+def test_runtime_routes_utc_candle_by_tehran_session_time(tmp_path):
+    session = SessionConfig("tehran", "15:20", "15:30", "15:40", 920, 930, 940)
+    symbol = SymbolConfig(
+        symbol="ADA-SWAP-USDT",
+        enabled=True,
+        margin_type=MarginType.CROSS,
+        leverage=20,
+        wallet_percent=Decimal("5"),
+        take_profit_percent=Decimal("0.5"),
+        stop_loss_percent=Decimal("0.5"),
+        trigger_by=TriggerBy.CONTRACT_PRICE,
+        sessions=(session,),
+    )
+    config = BotConfig(
+        exchange=ExchangeConfig("", ""),
+        runtime=RuntimeConfig(timezone="Asia/Tehran", timeframe="5m", dry_run=True, state_path=str(tmp_path / "state.json"), log_path=str(tmp_path / "bot.log")),
+        symbols=(symbol,),
+    )
+    runtime = BotRuntime(config, state_store=AtomicStateStore(config.runtime.state_path), rest_client=FakeRest(), private_client=FakePrivate())
+
+    open_ms = int(datetime(2026, 7, 28, 11, 50, tzinfo=timezone.utc).timestamp() * 1000)
+    runtime._on_market_candle(Candle("ADA-SWAP-USDT", "5m", open_ms, open_ms + 299999, Decimal("0.75"), Decimal("0.76"), Decimal("0.74"), Decimal("0.755"), Decimal("100")))
+
+    state = runtime.engine.symbols["ADA-SWAP-USDT"].state.sessions["2026-07-28:tehran"]
+    assert state.phase.value == "COLLECTING"
+    assert len(state.range_candles) == 1
+
+
 def test_restart_restores_consumed_session(tmp_path):
     config = make_config(tmp_path)
     store = AtomicStateStore(config.runtime.state_path)
