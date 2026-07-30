@@ -5,6 +5,7 @@ import logging
 import random
 import threading
 from collections.abc import Callable, Iterable
+from decimal import Decimal
 
 import websocket
 
@@ -21,12 +22,14 @@ class ToobitMarketWebSocket:
         on_candle: Callable[[Candle], None],
         url: str = "wss://stream.toobit.com/quote/ws/v1",
         max_backoff_seconds: float = 30.0,
+        on_price: Callable[[str, Decimal], None] | None = None,
     ) -> None:
         self.symbols = tuple(dict.fromkeys(symbols))
         if not self.symbols:
             raise ValueError("at least one symbol is required")
         self.interval = interval
         self.on_candle = on_candle
+        self.on_price = on_price
         self.url = url
         self.max_backoff_seconds = max_backoff_seconds
         self._stop = threading.Event()
@@ -109,6 +112,8 @@ class ToobitMarketWebSocket:
             if not isinstance(item, dict) or not {"t", "s", "o", "h", "l", "c"} <= item.keys():
                 continue
             candle = Candle.from_ws(self.interval, item)
+            if self.on_price is not None:
+                self.on_price(candle.symbol, candle.close)
             previous = self._pending.get(candle.symbol)
             if previous is not None and candle.open_time_ms > previous.open_time_ms:
                 LOGGER.info(
