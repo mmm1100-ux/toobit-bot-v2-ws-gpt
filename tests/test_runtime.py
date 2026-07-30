@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from app.core.config import BotConfig, ExchangeConfig, RuntimeConfig, SessionConfig, SymbolConfig
 from app.core.enums import MarginType, TriggerBy
@@ -123,7 +124,7 @@ def test_market_status_logs_configured_time_symbol_session_and_live_price(tmp_pa
         runtime=RuntimeConfig(timezone="Asia/Tehran", timeframe="5m", dry_run=True, state_path=str(tmp_path / "state.json"), log_path=str(tmp_path / "bot.log")),
         symbols=(symbol,),
     )
-    now = datetime(2026, 7, 30, 16, 10, 5, tzinfo=runtime_tz := __import__("zoneinfo").ZoneInfo("Asia/Tehran"))
+    now = datetime(2026, 7, 30, 16, 10, 5, tzinfo=ZoneInfo("Asia/Tehran"))
     runtime = BotRuntime(
         config,
         state_store=AtomicStateStore(config.runtime.state_path),
