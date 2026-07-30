@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -102,3 +103,42 @@ def test_restart_restores_consumed_session(tmp_path):
 
     second = BotRuntime(config, state_store=store, rest_client=FakeRest(), private_client=FakePrivate())
     assert second.engine.symbols["BTCUSDT"].state.sessions["1970-01-01:s1"].signal_emitted is True
+
+
+def test_market_status_logs_configured_time_symbol_session_and_live_price(tmp_path, caplog):
+    session = SessionConfig("ada_live", "16:00", "16:30", "17:00", 960, 990, 1020)
+    symbol = SymbolConfig(
+        symbol="ADA-SWAP-USDT",
+        enabled=True,
+        margin_type=MarginType.CROSS,
+        leverage=20,
+        wallet_percent=Decimal("5"),
+        take_profit_percent=Decimal("0.5"),
+        stop_loss_percent=Decimal("0.5"),
+        trigger_by=TriggerBy.CONTRACT_PRICE,
+        sessions=(session,),
+    )
+    config = BotConfig(
+        exchange=ExchangeConfig("", ""),
+        runtime=RuntimeConfig(timezone="Asia/Tehran", timeframe="5m", dry_run=True, state_path=str(tmp_path / "state.json"), log_path=str(tmp_path / "bot.log")),
+        symbols=(symbol,),
+    )
+    now = datetime(2026, 7, 30, 16, 10, 5, tzinfo=runtime_tz := __import__("zoneinfo").ZoneInfo("Asia/Tehran"))
+    runtime = BotRuntime(
+        config,
+        state_store=AtomicStateStore(config.runtime.state_path),
+        rest_client=FakeRest(),
+        private_client=FakePrivate(),
+        clock=lambda: now,
+    )
+
+    runtime._on_market_price("ADA-SWAP-USDT", Decimal("0.15742"))
+    with caplog.at_level(logging.INFO, logger="app.runtime"):
+        runtime.log_market_status_once(now)
+
+    record = next(item for item in caplog.records if getattr(item, "event", None) == "market_second_status")
+    assert record.timezone == "Asia/Tehran"
+    assert record.local_time == "2026-07-30T16:10:05+03:30"
+    assert record.symbol == "ADA-SWAP-USDT"
+    assert record.session == "ada_live"
+    assert record.price == "0.15742"
