@@ -20,12 +20,7 @@ def _decimal(value: Any, field: str) -> Decimal:
 
 
 def _validate_timezone(value: Any) -> str:
-    """Validate an IANA timezone while keeping UTC independent of tzdata.
-
-    Windows does not ship the IANA timezone database used by ``zoneinfo``.
-    UTC itself is built into Python and must remain usable even when the
-    external tzdata package is absent or damaged.
-    """
+    """Validate an IANA timezone while keeping UTC independent of tzdata."""
     name = str(value or "UTC").strip()
     if not name:
         raise ConfigError("timezone cannot be empty")
@@ -55,6 +50,8 @@ class RuntimeConfig:
     timezone: str = "UTC"
     timeframe: str = "5m"
     dry_run: bool = True
+    heartbeat_log_enabled: bool = True
+    heartbeat_log_seconds: float = 1.0
     state_path: str = "state.json"
     log_path: str = "logs/bot.log"
 
@@ -181,6 +178,10 @@ def load_config(path: str | Path = "config.json") -> BotConfig:
     runtime_raw = raw.get("runtime", {})
     timezone_name = _validate_timezone(runtime_raw.get("timezone", "UTC"))
 
+    heartbeat_log_seconds = float(runtime_raw.get("heartbeat_log_seconds", 1.0))
+    if heartbeat_log_seconds <= 0:
+        raise ConfigError("runtime.heartbeat_log_seconds must be greater than zero")
+
     exchange = ExchangeConfig(
         api_key=os.getenv("TOOBIT_API_KEY", ""),
         api_secret=os.getenv("TOOBIT_API_SECRET", ""),
@@ -193,6 +194,8 @@ def load_config(path: str | Path = "config.json") -> BotConfig:
         timezone=timezone_name,
         timeframe=str(runtime_raw.get("timeframe", "5m")),
         dry_run=bool(runtime_raw.get("dry_run", True)),
+        heartbeat_log_enabled=bool(runtime_raw.get("heartbeat_log_enabled", True)),
+        heartbeat_log_seconds=heartbeat_log_seconds,
         state_path=str(runtime_raw.get("state_path", "state.json")),
         log_path=str(runtime_raw.get("log_path", "logs/bot.log")),
     )
