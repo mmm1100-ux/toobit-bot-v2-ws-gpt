@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 import signal
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from app.core.config import BotConfig
+from app.core.config import BotConfig, SessionConfig
 from app.core.engine import TradingEngine
 from app.core.state import Candle as StateCandle
 from app.exchange.private_client import ToobitPrivateClient
@@ -58,6 +58,7 @@ class BotRuntime:
         self.poll_seconds = poll_seconds
         self._stop = threading.Event()
         self._lock = threading.RLock()
+        self._latest_prices: dict[str, tuple[Decimal, datetime]] = {}
 
         rules = contract_rules or {}
         self.signal_executor = SignalExecutor(OrderManager(self.private, rules)) if rules else None
@@ -70,6 +71,7 @@ class BotRuntime:
             config.runtime.timeframe,
             self._on_market_candle,
             url=config.exchange.ws_url,
+            on_price=self._on_market_price,
         )
 
     def _as_local(self, value: datetime) -> datetime:
@@ -79,6 +81,55 @@ class BotRuntime:
 
     def _persist(self) -> None:
         self.state_store.save(self.state)
+
+    def _on_market_price(self, symbol: str, price: Decimal) -> None:
+        with self._lock:
+            self._latest_prices[symbol] = (price, self._as_local(self.clock()))
+
+    @staticmethod
+    def _session_is_active(session: SessionConfig, current: datetime) -> bool:
+        minute = current.hour * 60 + current.minute
+        if session.crosses_midnight:
+            return minute >= session.collection_start_minute or minute < session.expire_minute
+        return session.collection_start_minute <= minute < session.expire_minute
+
+    @staticmethod
+    def _session_key(session: SessionConfig, current: datetime) -> str:
+        minute = current.hour * 60 + current.minute
+        trading_date = current.date()
+        if session.crosses_midnight and minute < session.expire_minute:
+            trading_date -= timedelta(days=1)
+        return f"{trading_date.isoformat()}:{session.name}"
+
+    def log_market_status_once(self, now: datetime | None = None) -> None:
+        current = self._as_local(now or self.clock())
+        with self._lock:
+            for symbol, engine in self.engine.symbols.items():
+                price_row = self._latest_prices.get(symbol)
+                price = price_row[0] if price_row else None
+                received_at = price_row[1] if price_row else None
+                price_age = (current - received_at).total_seconds() if received_at else None
+
+                for session in engine.config.sessions:
+                    if not self._session_is_active(session, current):
+                        continue
+                    session_key = self._session_key(session, current)
+                    state = engine.state.sessions.get(session_key)
+                    LOGGER.info(
+                        "market_second_status",
+                        extra={
+                            "event": "market_second_status",
+                            "timezone": self.config.runtime.timezone,
+                            "local_time": current.isoformat(timespec="seconds"),
+                            "symbol": symbol,
+                            "session": session.name,
+                            "session_key": session_key,
+                            "phase": state.phase.value if state is not None else "IDLE",
+                            "price": str(price) if price is not None else None,
+                            "price_received_at": received_at.isoformat(timespec="seconds") if received_at else None,
+                            "price_age_seconds": round(price_age, 3) if price_age is not None else None,
+                        },
+                    )
 
     def _on_market_candle(self, candle: Candle) -> None:
         with self._lock:
@@ -217,11 +268,14 @@ class BotRuntime:
                 "dry_run": self.config.runtime.dry_run,
                 "symbols": list(self.engine.symbols),
                 "timeframe": self.config.runtime.timeframe,
+                "market_status_interval_seconds": self.poll_seconds,
             },
         )
         try:
             while not self._stop.wait(self.poll_seconds):
-                self.run_expirations_once()
+                current = self._as_local(self.clock())
+                self.run_expirations_once(current)
+                self.log_market_status_once(current)
         finally:
             self.ws.stop()
             self._persist()
