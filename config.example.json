@@ -9,6 +9,8 @@
     "timezone": "UTC",
     "timeframe": "5m",
     "dry_run": true,
+    "heartbeat_log_enabled": true,
+    "heartbeat_log_seconds": 1,
     "state_path": "state.json",
     "log_path": "logs/bot.log"
   },
