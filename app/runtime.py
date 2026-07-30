@@ -59,6 +59,7 @@ class BotRuntime:
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._latest_prices: dict[str, tuple[Decimal, datetime]] = {}
+        self._next_heartbeat_at: datetime | None = None
 
         rules = contract_rules or {}
         self.signal_executor = SignalExecutor(OrderManager(self.private, rules)) if rules else None
@@ -130,6 +131,15 @@ class BotRuntime:
                             "price_age_seconds": round(price_age, 3) if price_age is not None else None,
                         },
                     )
+
+    def _heartbeat_due(self, current: datetime) -> bool:
+        runtime = self.config.runtime
+        if not runtime.heartbeat_log_enabled:
+            return False
+        if self._next_heartbeat_at is None or current >= self._next_heartbeat_at:
+            self._next_heartbeat_at = current + timedelta(seconds=runtime.heartbeat_log_seconds)
+            return True
+        return False
 
     def _on_market_candle(self, candle: Candle) -> None:
         with self._lock:
@@ -268,14 +278,17 @@ class BotRuntime:
                 "dry_run": self.config.runtime.dry_run,
                 "symbols": list(self.engine.symbols),
                 "timeframe": self.config.runtime.timeframe,
-                "market_status_interval_seconds": self.poll_seconds,
+                "runtime_poll_seconds": self.poll_seconds,
+                "heartbeat_log_enabled": self.config.runtime.heartbeat_log_enabled,
+                "heartbeat_log_seconds": self.config.runtime.heartbeat_log_seconds,
             },
         )
         try:
             while not self._stop.wait(self.poll_seconds):
                 current = self._as_local(self.clock())
                 self.run_expirations_once(current)
-                self.log_market_status_once(current)
+                if self._heartbeat_due(current):
+                    self.log_market_status_once(current)
         finally:
             self.ws.stop()
             self._persist()
