@@ -6,6 +6,7 @@ from datetime import datetime
 from app.core.config import SymbolConfig
 from app.core.scheduler import SessionEvent, session_clock
 from app.core.state import Candle, SessionState, SymbolState
+from app.orders.manager import OrderOutcomeUnknown
 from app.strategy.breakout import BreakoutStrategy
 from app.strategy.signals import TradeSignal
 
@@ -62,7 +63,14 @@ class SymbolEngine:
             state.reserve_signal(signal.candle_open_time, signal.side, signal.close_price)
             signals.append(signal)
             if self.on_signal is not None:
-                self.on_signal(signal)
+                try:
+                    self.on_signal(signal)
+                except OrderOutcomeUnknown:
+                    raise
+                except Exception:
+                    if state.signal_emitted and not state.trade_committed:
+                        state.release_signal()
+                    raise
         return signals
 
     def release_signal(self, signal: TradeSignal) -> None:
