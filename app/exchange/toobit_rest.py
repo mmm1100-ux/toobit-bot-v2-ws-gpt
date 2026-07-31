@@ -70,8 +70,14 @@ class ToobitRestClient:
                 )
             except (KeyError, ValueError) as exc:
                 raise ValueError(f"Toobit contract {symbol} has invalid trading filters") from exc
-            if min(parsed.step_size, parsed.min_quantity, parsed.min_notional, parsed.tick_size) <= 0:
-                raise ValueError(f"Toobit contract {symbol} has non-positive trading filters")
+
+            # Toobit USDT-M contracts commonly publish MIN_NOTIONAL=0, which means
+            # no additional notional floor is enforced by this filter. Quantity and
+            # price increments must still be strictly positive.
+            if parsed.step_size <= 0 or parsed.min_quantity <= 0 or parsed.tick_size <= 0:
+                raise ValueError(f"Toobit contract {symbol} has non-positive quantity or price filters")
+            if parsed.min_notional < 0:
+                raise ValueError(f"Toobit contract {symbol} has a negative minimum notional")
             rules[symbol] = parsed
 
         missing = sorted(requested - rules.keys())
