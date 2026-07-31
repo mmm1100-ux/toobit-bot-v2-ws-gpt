@@ -54,13 +54,27 @@ class ToobitPrivateClient:
             raise ToobitApiError(str(message), code=code, ambiguous=False)
         return data
 
+    @staticmethod
+    def _rows(response: Any) -> list[dict[str, Any]]:
+        rows = response.get("data", response) if isinstance(response, dict) else response
+        if isinstance(rows, dict):
+            rows = [rows]
+        if not isinstance(rows, list):
+            raise ToobitApiError("unexpected Toobit account response")
+        return [row for row in rows if isinstance(row, dict)]
+
+    @staticmethod
+    def _normalise_margin_type(value: Any) -> str:
+        margin_type = str(value or "").upper()
+        if margin_type == "CROSSED":
+            return "CROSS"
+        return margin_type
+
     def balance(self) -> Any:
         return self._signed("GET", "/api/v1/futures/balance")
 
     def total_balance(self, coin: str = "USDT") -> Decimal:
-        response = self.balance()
-        rows = response.get("data", response) if isinstance(response, dict) else response
-        for row in rows:
+        for row in self._rows(self.balance()):
             if str(row.get("coin", "")).upper() == coin.upper():
                 return Decimal(str(row["balance"]))
         raise ToobitApiError(f"{coin} futures balance not found")
@@ -71,9 +85,81 @@ class ToobitPrivateClient:
     def set_leverage(self, symbol: str, leverage: int) -> Any:
         return self._signed("POST", "/api/v1/futures/leverage", {"symbol": symbol, "leverage": leverage})
 
+    def account_leverage(self, symbol: str) -> dict[str, Any]:
+        response = self._signed("GET", "/api/v1/futures/accountLeverage", {"symbol": symbol})
+        requested = symbol.upper()
+        for row in self._rows(response):
+            row_symbol = str(row.get("symbolId", row.get("symbol", ""))).upper()
+            if row_symbol == requested:
+                return row
+        raise ToobitApiError(f"Toobit account leverage settings not found for {symbol}")
+
+    def ensure_symbol_configuration(
+        self,
+        symbol: str,
+        margin_type: str,
+        leverage: int,
+        *,
+        verification_attempts: int = 3,
+        verification_delay_seconds: float = 0.25,
+    ) -> dict[str, Any]:
+        """Apply margin mode/leverage only when needed, then read back and verify.
+
+        No opening order should be submitted unless this method returns successfully.
+        Ambiguous POST timeouts are reconciled through the signed read endpoint.
+        """
+        expected_margin = self._normalise_margin_type(margin_type)
+        expected_leverage = int(leverage)
+        if expected_margin not in {"CROSS", "ISOLATED"}:
+            raise ToobitApiError(f"unsupported margin type for {symbol}: {margin_type}")
+        if expected_leverage <= 0:
+            raise ToobitApiError(f"invalid leverage for {symbol}: {leverage}")
+
+        current = self.account_leverage(symbol)
+        current_margin = self._normalise_margin_type(current.get("marginType"))
+        try:
+            current_leverage = int(str(current.get("leverage")))
+        except (TypeError, ValueError) as exc:
+            raise ToobitApiError(f"invalid leverage returned by Toobit for {symbol}") from exc
+
+        if current_margin != expected_margin:
+            try:
+                self.set_margin_type(symbol, expected_margin)
+            except ToobitApiError as exc:
+                if not exc.ambiguous:
+                    raise
+
+        if current_leverage != expected_leverage:
+            try:
+                self.set_leverage(symbol, expected_leverage)
+            except ToobitApiError as exc:
+                if not exc.ambiguous:
+                    raise
+
+        attempts = max(1, int(verification_attempts))
+        last: dict[str, Any] | None = None
+        for attempt in range(attempts):
+            if attempt and verification_delay_seconds > 0:
+                time.sleep(verification_delay_seconds)
+            last = self.account_leverage(symbol)
+            actual_margin = self._normalise_margin_type(last.get("marginType"))
+            try:
+                actual_leverage = int(str(last.get("leverage")))
+            except (TypeError, ValueError):
+                actual_leverage = -1
+            if actual_margin == expected_margin and actual_leverage == expected_leverage:
+                return last
+
+        actual_margin = self._normalise_margin_type((last or {}).get("marginType")) or "UNKNOWN"
+        actual_leverage = (last or {}).get("leverage", "UNKNOWN")
+        raise ToobitApiError(
+            f"refusing to trade {symbol}: requested margin/leverage "
+            f"{expected_margin}/{expected_leverage}x but Toobit reports "
+            f"{actual_margin}/{actual_leverage}x"
+        )
+
     def configure_symbol(self, symbol: str, margin_type: str, leverage: int) -> None:
-        self.set_margin_type(symbol, margin_type)
-        self.set_leverage(symbol, leverage)
+        self.ensure_symbol_configuration(symbol, margin_type, leverage)
 
     def place_market_order(self, **params: Any) -> Any:
         return self._signed("POST", "/api/v1/futures/order", params)
