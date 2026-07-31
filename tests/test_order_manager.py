@@ -32,10 +32,18 @@ def signal(side: PositionSide = PositionSide.LONG) -> TradeSignal:
 
 
 class Client:
-    def __init__(self, error=None, query_error=None):
+    def __init__(self, error=None, query_error=None, configuration_error=None):
         self.error = error
         self.query_error = query_error
+        self.configuration_error = configuration_error
         self.params = None
+        self.configuration = None
+
+    def ensure_symbol_configuration(self, symbol, margin_type, leverage):
+        self.configuration = (symbol, margin_type, leverage)
+        if self.configuration_error:
+            raise self.configuration_error
+        return {"symbolId": symbol, "marginType": margin_type, "leverage": str(leverage)}
 
     def place_market_order(self, **params):
         self.params = params
@@ -60,6 +68,7 @@ def test_long_plan_uses_wallet_percent_and_leverage():
     assert plan.quantity == Decimal("0.010")
     assert plan.take_profit == Decimal("100500.0")
     assert plan.stop_loss == Decimal("99500.0")
+    assert client.configuration == ("BTC-SWAP-USDT", "CROSS", 20)
     assert client.params["side"] == "BUY_OPEN"
     assert client.params["priceType"] == "MARKET"
 
@@ -69,6 +78,13 @@ def test_short_tp_and_sl_are_reversed():
     assert plan.side == "SELL_OPEN"
     assert plan.take_profit == Decimal("99500.0")
     assert plan.stop_loss == Decimal("100500.0")
+
+
+def test_configuration_mismatch_blocks_order_submission():
+    client = Client(configuration_error=ToobitApiError("exchange still reports 50x"))
+    with pytest.raises(OrderRejected, match="50x"):
+        manager(client).submit(signal(), config(), Decimal("1000"))
+    assert client.params is None
 
 
 def test_explicit_rejection_releases_session():
