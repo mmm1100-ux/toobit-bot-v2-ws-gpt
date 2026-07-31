@@ -51,6 +51,18 @@ class OrderManager:
         )
 
     def submit(self, signal: TradeSignal, config: SymbolConfig, wallet_balance: Decimal) -> tuple[EntryPlan, dict]:
+        # Safety gate: the exchange-side margin mode and leverage must match the
+        # strategy configuration immediately before an opening order is built
+        # and submitted. Any mismatch or unverifiable result rejects the entry.
+        try:
+            self.client.ensure_symbol_configuration(
+                signal.symbol,
+                config.margin_type.value,
+                config.leverage,
+            )
+        except ToobitApiError as exc:
+            raise OrderRejected(str(exc)) from exc
+
         plan = self.build_plan(signal, config, wallet_balance)
         try:
             response = self.client.place_market_order(
