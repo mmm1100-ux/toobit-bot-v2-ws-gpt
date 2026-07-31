@@ -26,14 +26,14 @@ class FakeSession:
         return FakeResponse(self.payload)
 
 
-def contract(symbol="ADA-SWAP-USDT", status="TRADING"):
+def contract(symbol="ADA-SWAP-USDT", status="TRADING", min_notional="5"):
     return {
         "symbol": symbol,
         "status": status,
         "filters": [
             {"filterType": "PRICE_FILTER", "tickSize": "0.0001"},
             {"filterType": "LOT_SIZE", "minQty": "1", "stepSize": "1"},
-            {"filterType": "MIN_NOTIONAL", "minNotional": "5"},
+            {"filterType": "MIN_NOTIONAL", "minNotional": min_notional},
         ],
     }
 
@@ -49,6 +49,23 @@ def test_fetch_contract_rules_uses_exchange_info_contract_filters():
     assert rules["ADA-SWAP-USDT"].min_quantity == Decimal("1")
     assert rules["ADA-SWAP-USDT"].min_notional == Decimal("5")
     assert rules["ADA-SWAP-USDT"].tick_size == Decimal("0.0001")
+
+
+def test_fetch_contract_rules_accepts_zero_futures_min_notional():
+    client = ToobitRestClient("https://api.toobit.com")
+    client._session = FakeSession({"contracts": [contract(min_notional="0")]})
+
+    rules = client.fetch_contract_rules(["ADA-SWAP-USDT"])
+
+    assert rules["ADA-SWAP-USDT"].min_notional == Decimal("0")
+
+
+def test_fetch_contract_rules_rejects_negative_min_notional():
+    client = ToobitRestClient("https://api.toobit.com")
+    client._session = FakeSession({"contracts": [contract(min_notional="-1")]})
+
+    with pytest.raises(ValueError, match="negative minimum notional"):
+        client.fetch_contract_rules(["ADA-SWAP-USDT"])
 
 
 def test_fetch_contract_rules_fails_fast_when_symbol_is_missing():
