@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from app.core.config import MarginType, SessionConfig, SymbolConfig, TriggerBy
 from app.core.state import Candle
 from app.symbols.engine import SymbolEngine
@@ -43,6 +45,31 @@ def test_range_uses_closed_candle_shadows() -> None:
     state = engine.session_state("morning", "2026-07-28")
     assert state.range_high == Decimal("1.30")
     assert state.range_low == Decimal("0.80")
+
+
+def test_failed_signal_callback_releases_reservation() -> None:
+    engine = SymbolEngine(config(), on_signal=lambda _signal: (_ for _ in ()).throw(RuntimeError("entry failed")))
+    engine.on_closed_candle(
+        candle(1, "1.20", "0.90", "1.00"),
+        datetime(2026, 7, 28, 5, 45, tzinfo=timezone.utc),
+    )
+    engine.on_closed_candle(
+        candle(2, "1.30", "0.80", "1.00"),
+        datetime(2026, 7, 28, 6, 10, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(RuntimeError, match="entry failed"):
+        engine.on_closed_candle(
+            candle(3, "1.40", "1.10", "1.40"),
+            datetime(2026, 7, 28, 6, 15, tzinfo=timezone.utc),
+        )
+
+    state = engine.session_state("morning", "2026-07-28")
+    assert state.signal_emitted is False
+    assert state.signal_candle_open_time is None
+    assert state.direction is None
+    assert state.signal_price is None
+    assert state.trade_committed is False
 
 
 def test_expire_is_returned_once() -> None:
