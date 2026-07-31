@@ -4,6 +4,7 @@ import argparse
 
 from app.core.config import load_config
 from app.core.logging import configure_logging
+from app.exchange.toobit_rest import ToobitRestClient
 from app.runtime import BotRuntime
 from app.storage.state_store import AtomicStateStore
 
@@ -20,7 +21,17 @@ def main() -> int:
         timezone_name=config.runtime.timezone,
     )
     store = AtomicStateStore(config.runtime.state_path)
-    runtime = BotRuntime(config, state_store=store)
+    rest_client = ToobitRestClient(config.exchange.base_url)
+    rules = None
+    if not config.runtime.dry_run:
+        live_symbols = [item.symbol for item in config.enabled_symbols]
+        rules = rest_client.fetch_contract_rules(live_symbols)
+    runtime = BotRuntime(
+        config,
+        state_store=store,
+        rest_client=rest_client,
+        contract_rules=rules,
+    )
 
     if args.check:
         store.save(runtime.state)
