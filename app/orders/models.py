@@ -10,10 +10,25 @@ class ContractRules:
     min_quantity: Decimal
     min_notional: Decimal
     tick_size: Decimal
+    contract_multiplier: Decimal = Decimal("1")
 
-    def floor_quantity(self, value: Decimal) -> Decimal:
+    def floor_underlying_quantity(self, value: Decimal) -> Decimal:
+        """Floor token quantity using exchange LOT_SIZE rules."""
         units = (value / self.step_size).to_integral_value(rounding=ROUND_DOWN)
         return units * self.step_size
+
+    def order_quantity_for_underlying(self, value: Decimal) -> Decimal:
+        """Convert token quantity to the integer contract count expected by Toobit."""
+        underlying = self.floor_underlying_quantity(value)
+        contracts = (underlying / self.contract_multiplier).to_integral_value(rounding=ROUND_DOWN)
+        return contracts
+
+    def underlying_quantity_for_order(self, contracts: Decimal) -> Decimal:
+        return contracts * self.contract_multiplier
+
+    def floor_quantity(self, value: Decimal) -> Decimal:
+        """Backward-compatible alias for flooring token quantity."""
+        return self.floor_underlying_quantity(value)
 
     def round_price(self, value: Decimal) -> Decimal:
         units = (value / self.tick_size).to_integral_value(rounding=ROUND_HALF_UP)
