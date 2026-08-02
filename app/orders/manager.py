@@ -27,9 +27,19 @@ class OrderManager:
         rules = self.rules[signal.symbol]
         margin = wallet_balance * config.wallet_percent / Decimal("100")
         notional = margin * Decimal(config.leverage)
-        quantity = rules.floor_quantity(notional / signal.close_price)
-        if quantity < rules.min_quantity or quantity * signal.close_price < rules.min_notional:
-            raise OrderRejected(f"calculated quantity for {signal.symbol} is below exchange minimum")
+
+        target_underlying = notional / signal.close_price
+        quantity = rules.order_quantity_for_underlying(target_underlying)
+        actual_underlying = rules.underlying_quantity_for_order(quantity)
+        actual_notional = actual_underlying * signal.close_price
+
+        if quantity <= 0:
+            raise OrderRejected(f"calculated contract quantity for {signal.symbol} is zero")
+        if actual_underlying < rules.min_quantity or actual_notional < rules.min_notional:
+            raise OrderRejected(
+                f"calculated quantity for {signal.symbol} is below exchange minimum "
+                f"(contracts={quantity}, underlying={actual_underlying}, notional={actual_notional})"
+            )
 
         change_tp = config.take_profit_percent / Decimal("100")
         change_sl = config.stop_loss_percent / Decimal("100")
@@ -51,9 +61,6 @@ class OrderManager:
         )
 
     def submit(self, signal: TradeSignal, config: SymbolConfig, wallet_balance: Decimal) -> tuple[EntryPlan, dict]:
-        # Safety gate: the exchange-side margin mode and leverage must match the
-        # strategy configuration immediately before an opening order is built
-        # and submitted. Any mismatch or unverifiable result rejects the entry.
         try:
             self.client.ensure_symbol_configuration(
                 signal.symbol,
