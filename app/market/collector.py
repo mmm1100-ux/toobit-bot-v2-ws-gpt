@@ -14,6 +14,10 @@ class CandleCollector:
         self._candles: dict[tuple[str, int], Candle] = {}
         self._lock = RLock()
 
+    def contains(self, symbol: str, open_time_ms: int) -> bool:
+        with self._lock:
+            return (symbol, open_time_ms) in self._candles
+
     def ingest(self, candle: Candle) -> list[Candle]:
         if candle.interval != self.interval:
             raise ValueError("candle interval does not match collector")
