@@ -58,19 +58,26 @@ class Client:
 
 
 def manager(client):
-    rules = ContractRules(Decimal("0.001"), Decimal("0.001"), Decimal("10"), Decimal("0.1"))
+    rules = ContractRules(
+        step_size=Decimal("0.001"),
+        min_quantity=Decimal("0.001"),
+        min_notional=Decimal("10"),
+        tick_size=Decimal("0.1"),
+        contract_multiplier=Decimal("0.001"),
+    )
     return OrderManager(client, {"BTC-SWAP-USDT": rules})
 
 
-def test_long_plan_uses_wallet_percent_and_leverage():
+def test_long_plan_uses_wallet_percent_leverage_and_contract_multiplier():
     client = Client()
     plan, _ = manager(client).submit(signal(), config(), Decimal("1000"))
-    assert plan.quantity == Decimal("0.010")
+    assert plan.quantity == Decimal("10")
     assert plan.take_profit == Decimal("100500.0")
     assert plan.stop_loss == Decimal("99500.0")
     assert client.configuration == ("BTC-SWAP-USDT", "CROSS", 20)
     assert client.params["side"] == "BUY_OPEN"
     assert client.params["priceType"] == "MARKET"
+    assert client.params["quantity"] == Decimal("10")
 
 
 def test_short_tp_and_sl_are_reversed():
@@ -113,4 +120,4 @@ def test_success_commits_trade():
     state.reserve_signal(1, PositionSide.LONG, Decimal("100000"))
     SignalExecutor(manager(Client())).execute(signal(), config(), state, Decimal("1000"))
     assert state.trade_committed is True
-    assert state.quantity == Decimal("0.010")
+    assert state.quantity == Decimal("10")
