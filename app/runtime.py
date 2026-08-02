@@ -19,7 +19,7 @@ from app.expire.manager import ExpireManager
 from app.market.candle import Candle
 from app.market.collector import CandleCollector
 from app.orders.execution import SignalExecutor
-from app.orders.manager import OrderManager
+from app.orders.manager import OrderManager, OrderOutcomeUnknown, OrderRejected
 from app.orders.models import ContractRules
 from app.storage.state_store import AtomicStateStore
 from app.strategy.signals import TradeSignal
@@ -143,6 +143,7 @@ class BotRuntime:
 
     def _on_market_candle(self, candle: Candle) -> None:
         with self._lock:
+            duplicate = self.collector.contains(candle.symbol, candle.open_time_ms)
             recovered = self.collector.ingest(candle)
             if recovered:
                 LOGGER.warning(
@@ -153,9 +154,44 @@ class BotRuntime:
                         "count": len(recovered),
                     },
                 )
-            for item in [*recovered, candle]:
-                self._route_closed_candle(item)
+            for item in recovered:
+                self._route_closed_candle_safely(item)
+            if duplicate:
+                LOGGER.warning(
+                    "duplicate_closed_candle_skipped",
+                    extra={
+                        "event": "duplicate_closed_candle_skipped",
+                        "symbol": candle.symbol,
+                        "open_time_ms": candle.open_time_ms,
+                    },
+                )
+            else:
+                self._route_closed_candle_safely(candle)
             self._persist()
+
+    def _route_closed_candle_safely(self, candle: Candle) -> None:
+        try:
+            self._route_closed_candle(candle)
+        except OrderRejected as exc:
+            LOGGER.error(
+                "entry_order_rejected",
+                extra={
+                    "event": "entry_order_rejected",
+                    "symbol": candle.symbol,
+                    "open_time_ms": candle.open_time_ms,
+                    "reason": str(exc),
+                },
+            )
+        except OrderOutcomeUnknown as exc:
+            LOGGER.critical(
+                "entry_order_outcome_unknown",
+                extra={
+                    "event": "entry_order_outcome_unknown",
+                    "symbol": candle.symbol,
+                    "open_time_ms": candle.open_time_ms,
+                    "client_order_id": str(exc),
+                },
+            )
 
     def _route_closed_candle(self, candle: Candle) -> None:
         engine = self.engine.symbols.get(candle.symbol)
