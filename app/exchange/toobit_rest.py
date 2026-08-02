@@ -67,15 +67,21 @@ class ToobitRestClient:
                     min_quantity=Decimal(str(lot_filter["minQty"])),
                     min_notional=Decimal(str(notional_filter["minNotional"])),
                     tick_size=Decimal(str(price_filter["tickSize"])),
+                    contract_multiplier=Decimal(str(contract["contractMultiplier"])),
                 )
             except (KeyError, ValueError) as exc:
                 raise ValueError(f"Toobit contract {symbol} has invalid trading filters") from exc
 
-            # Toobit USDT-M contracts commonly publish MIN_NOTIONAL=0, which means
-            # no additional notional floor is enforced by this filter. Quantity and
-            # price increments must still be strictly positive.
-            if parsed.step_size <= 0 or parsed.min_quantity <= 0 or parsed.tick_size <= 0:
-                raise ValueError(f"Toobit contract {symbol} has non-positive quantity or price filters")
+            # LOT_SIZE values are token quantities, while the futures order endpoint
+            # expects an integer number of contracts. contractMultiplier connects the
+            # two representations and is mandatory for safe sizing.
+            if (
+                parsed.step_size <= 0
+                or parsed.min_quantity <= 0
+                or parsed.tick_size <= 0
+                or parsed.contract_multiplier <= 0
+            ):
+                raise ValueError(f"Toobit contract {symbol} has non-positive quantity, price, or multiplier rules")
             if parsed.min_notional < 0:
                 raise ValueError(f"Toobit contract {symbol} has a negative minimum notional")
             rules[symbol] = parsed
