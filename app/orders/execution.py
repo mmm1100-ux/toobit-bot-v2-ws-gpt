@@ -38,7 +38,7 @@ class SignalExecutor:
                 signal.side,
                 exc.plan.client_order_id,
                 exc.plan.executed_quantity or exc.plan.quantity,
-                exc.plan.fill_price or signal.close_price,
+                signal.close_price,
             )
             raise
         except OrderOutcomeUnknown:
@@ -48,6 +48,6 @@ class SignalExecutor:
             signal.side,
             plan.client_order_id,
             plan.executed_quantity or plan.quantity,
-            plan.fill_price or signal.close_price,
+            signal.close_price,
         )
         return response
