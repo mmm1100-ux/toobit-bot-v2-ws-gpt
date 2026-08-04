@@ -4,7 +4,12 @@ from decimal import Decimal
 
 from app.core.config import SymbolConfig
 from app.core.state import SessionState
-from app.orders.manager import OrderManager, OrderOutcomeUnknown, OrderRejected
+from app.orders.manager import (
+    OrderManager,
+    OrderOutcomeUnknown,
+    OrderRejected,
+    PositionProtectionFailed,
+)
 from app.strategy.signals import TradeSignal
 
 
@@ -26,8 +31,23 @@ class SignalExecutor:
         except OrderRejected:
             state.release_signal()
             raise
+        except PositionProtectionFailed as exc:
+            # The entry was confirmed filled. Even if the emergency flatten worked,
+            # the session must remain consumed so the same breakout cannot re-enter.
+            state.commit_trade(
+                signal.side,
+                exc.plan.client_order_id,
+                exc.plan.executed_quantity or exc.plan.quantity,
+                exc.plan.fill_price or signal.close_price,
+            )
+            raise
         except OrderOutcomeUnknown:
             # Keep signal_emitted=True: the exchange may have accepted the order.
             raise
-        state.commit_trade(signal.side, plan.client_order_id, plan.quantity, signal.close_price)
+        state.commit_trade(
+            signal.side,
+            plan.client_order_id,
+            plan.executed_quantity or plan.quantity,
+            plan.fill_price or signal.close_price,
+        )
         return response
