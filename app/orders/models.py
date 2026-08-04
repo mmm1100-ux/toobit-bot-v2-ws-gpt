@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_FLOOR, ROUND_HALF_UP
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +30,16 @@ class ContractRules:
         """Backward-compatible alias for flooring token quantity."""
         return self.floor_underlying_quantity(value)
 
+    def floor_price(self, value: Decimal) -> Decimal:
+        units = (value / self.tick_size).to_integral_value(rounding=ROUND_FLOOR)
+        return units * self.tick_size
+
+    def ceil_price(self, value: Decimal) -> Decimal:
+        units = (value / self.tick_size).to_integral_value(rounding=ROUND_CEILING)
+        return units * self.tick_size
+
     def round_price(self, value: Decimal) -> Decimal:
+        """Backward-compatible nearest-tick rounding."""
         units = (value / self.tick_size).to_integral_value(rounding=ROUND_HALF_UP)
         return units * self.tick_size
 
@@ -42,3 +51,5 @@ class EntryPlan:
     take_profit: Decimal
     stop_loss: Decimal
     side: str
+    fill_price: Decimal | None = None
+    executed_quantity: Decimal | None = None
