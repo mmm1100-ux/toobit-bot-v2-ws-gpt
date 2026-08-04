@@ -167,6 +167,43 @@ class ToobitPrivateClient:
     def query_order(self, client_order_id: str) -> Any:
         return self._signed("GET", "/api/v1/futures/order", {"origClientOrderId": client_order_id, "type": "LIMIT"})
 
+    def set_trading_stop(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        take_profit: Decimal,
+        stop_loss: Decimal,
+        quantity: Decimal,
+        trigger_by: str,
+    ) -> Any:
+        """Set fixed TP/SL on an already-open position.
+
+        Toobit's position trading-stop endpoint operates on the real open
+        position, allowing protection prices to be based on the confirmed
+        average fill price instead of the earlier candle close.
+        """
+        normalised_side = str(side).upper()
+        if normalised_side not in {"LONG", "SHORT"}:
+            raise ToobitApiError(f"unsupported position side for trading stop: {side}")
+        if take_profit <= 0 or stop_loss <= 0 or quantity <= 0:
+            raise ToobitApiError("trading-stop prices and quantity must be positive")
+        return self._signed(
+            "POST",
+            "/api/v1/futures/position/trading-stop",
+            {
+                "symbol": symbol,
+                "side": normalised_side,
+                "takeProfit": take_profit,
+                "stopLoss": stop_loss,
+                "tpTriggerBy": trigger_by,
+                "slTriggerBy": trigger_by,
+                "tpSize": quantity,
+                "slSize": quantity,
+                "stopType": "FIXED_STOP",
+            },
+        )
+
     def open_orders(self, symbol: str, order_type: str | None = None) -> Any:
         params: dict[str, Any] = {"symbol": symbol, "limit": 1000}
         if order_type:
